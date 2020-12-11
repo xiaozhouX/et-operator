@@ -52,10 +52,23 @@ type ExecOptions struct {
 	ContainerName string
 
 	Stdin         io.Reader
+	Stdout        io.Writer
+	Stderr        io.Writer
 	CaptureStdout bool
 	CaptureStderr bool
 	// If false, whitespace in std{err,out} will be removed.
 	PreserveWhitespace bool
+}
+
+func GetClient() (*kubernetes.Clientset, error) {
+	if clientset != nil {
+		return clientset, nil
+	}
+	err := initClient()
+	if err != nil {
+		return nil, err
+	}
+	return clientset, nil
 }
 
 func initClient() error {
@@ -63,16 +76,17 @@ func initClient() error {
 
 	if restConfig == nil {
 
-		home, err := Home()
-		if err != nil {
-			return err
-		}
-		kubeconfigPath = path.Join(home, ".kube/config")
 		if len(os.Getenv("KUBECONFIG")) > 0 {
 			kubeconfigPath = os.Getenv("KUBECONFIG")
-		}
-		if !PathExists(kubeconfigPath) {
-			kubeconfigPath = ""
+		} else {
+			home, err := Home()
+			if err != nil {
+				return err
+			}
+			kubeconfigPath = path.Join(home, ".kube/config")
+			if !PathExists(kubeconfigPath) {
+				kubeconfigPath = ""
+			}
 		}
 		log.Info("kubeconfig file is placed.", "config", kubeconfigPath)
 		restConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
@@ -92,10 +106,10 @@ func initClient() error {
 // ExecWithOptions executes a command in the specified container,
 // returning stdout, stderr and error. `options` allowed for
 // additional parameters to be passed.
-func ExecWithOptions(options ExecOptions) (string, string, error) {
+func ExecWithOptions(options ExecOptions) error {
 	err := initClient()
 	if err != nil {
-		return "", "", err
+		return err
 	}
 
 	log.V(1).Info("ExecWithOptions", "ExecWithOptions", options)
@@ -117,29 +131,29 @@ func ExecWithOptions(options ExecOptions) (string, string, error) {
 		TTY:       tty,
 	}, scheme.ParameterCodec)
 
-	var stdout, stderr bytes.Buffer
-	err = execute("POST", req.URL(), restConfig, options.Stdin, &stdout, &stderr, tty)
+	return execute("POST", req.URL(), restConfig, options.Stdin,
+		options.Stdout, options.Stderr, tty)
 
-	if options.PreserveWhitespace {
-		return stdout.String(), stderr.String(), err
-	}
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
 // ExecCommandInContainerWithFullOutput executes a command in the
 // specified container and return stdout, stderr and error
-func ExecCommandInContainerWithFullOutput(podName string, containerName string, namespace string, cmd []string) (stdout string, stderr string, err error) {
-	return ExecWithOptions(ExecOptions{
+func ExecCommandInContainerWithFullOutput(podName string, containerName string, namespace string, cmd []string) (stdoutStr string, stderrStr string, err error) {
+	var stdout, stderr bytes.Buffer
+	err = ExecWithOptions(ExecOptions{
 		Command:       cmd,
 		Namespace:     namespace,
 		PodName:       podName,
 		ContainerName: containerName,
 
 		Stdin:              nil,
+		Stdout:             &stdout,
+		Stderr:             &stderr,
 		CaptureStdout:      true,
 		CaptureStderr:      true,
 		PreserveWhitespace: false,
 	})
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
 func ExecShellInContainer(podName string, containerName string, namespace string, cmd string) (stdout string, stderr string, err error) {

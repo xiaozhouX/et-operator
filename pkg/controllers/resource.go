@@ -28,7 +28,7 @@ func newLauncher(obj interface{}) *corev1.Pod {
 		podSpec.Labels[key] = value
 	}
 	podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, initContainer(job))
-	//podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, kubedeliveryContainer())
+	podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, kubedeliveryContainer())
 	if len(podSpec.Spec.Containers) == 0 {
 		logger.Errorln("Launcher pod does not have any containers in its spec")
 		return nil
@@ -48,10 +48,10 @@ func newLauncher(obj interface{}) *corev1.Pod {
 			Name:      kubectlVolumeName,
 			MountPath: kubectlMountPath,
 		})
-	//container.Env = append(container.Env, corev1.EnvVar{
-	//	Name:  "OMPI_MCA_plm_rsh_agent",
-	//	Value: getKubexecPath(),
-	//})
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "OMPI_MCA_plm_rsh_agent",
+		Value: getKubexecPath(),
+	})
 	podSpec.Spec.Containers[0] = container
 	podSpec.Spec.ServiceAccountName = launcherName
 
