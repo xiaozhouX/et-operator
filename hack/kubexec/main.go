@@ -33,13 +33,12 @@ func KubectlExec(podName, containerName, namespace string, cmdStr string) (cmd *
 }
 
 func main() {
-	var podName string
 	flag.Parse()
-	podName = flag.Arg(0)
+	podName := flag.Arg(0)
 
 	clientset, err := util.GetClient()
 	if err != nil {
-		logger.Fatal(err.Error())
+		logger.Errorf(err.Error())
 		return
 	}
 
@@ -53,66 +52,64 @@ func main() {
 		logger.Errorf("failed to get pod %s in %s: %++v", podName, namespace, err)
 		return
 	}
+
 	podUid := targetPod.GetUID()
 	container := targetPod.Spec.Containers[0]
 
 	args := flag.Args()
 	cmdStr := strings.Join(args[1:], " ")
 
-	_, err = KubectlExec(podName, container.Name, "default", cmdStr)
-	if err != nil {
-		logger.Errorf("failed to exec cmd %s in pod %s: %++v", cmdStr, podName, err)
-		return
-	}
-
-	//cmd.Stdout = os.Stdout
-	//cmd.Stderr = os.Stderr
-	//err = cmd.Start()
-	//if err != nil {
-	//	logger.Errorf("failed to exec cmd %s in pod %s: %++v", cmdStr, podName, err)
-	//	return
-	//}
-
-	watcher, err := clientset.CoreV1().Pods(namespace).Watch(metav1.SingleObject(targetPod.ObjectMeta))
-	go func() {
-		ctx := context.TODO()
+	ctx, cancel := context.WithCancel(context.Background())
+	if targetPod.Spec.HostPID {
+		watcher, err := clientset.CoreV1().Pods(namespace).Watch(metav1.SingleObject(targetPod.ObjectMeta))
+		if err != nil {
+			logger.Errorf("failed to watch pod %s in %s: %++v", podName, namespace, err)
+			return
+		}
 		defer watcher.Stop()
-		for {
-			select {
-			case e := <-watcher.ResultChan():
-				{
+		go func() {
+			for {
+				select {
+				case e := <-watcher.ResultChan():
 					if e.Type == watch.Deleted {
 						logger.Infof("pod %s deleted", podName)
+						cancel()
 					}
 					if e.Object == nil {
 						continue
 					}
 
-					pod, ok := e.Object.(*corev1.Pod)
-					if !ok {
-						continue
-					}
-					switch pod.Status.Phase {
-					case corev1.PodFailed, corev1.PodSucceeded:
-						logger.Infof("pod %s status %s", podName, pod.Status.Phase)
-					case corev1.PodRunning:
-						if pod.GetUID() != podUid {
-							logger.Infof("pod %s uid %s, diff from %s", podName, pod.GetUID(), podUid)
+					if pod, ok := e.Object.(*corev1.Pod); ok {
+						switch pod.Status.Phase {
+						case corev1.PodFailed, corev1.PodSucceeded:
+							logger.Infof("pod %s status %s", podName, pod.Status.Phase)
+							cancel()
+						case corev1.PodRunning:
+							if pod.GetUID() != podUid {
+								logger.Infof("pod %s uid %s, diff from %s", podName, pod.GetUID(), podUid)
+							}
 						}
 					}
-					//if podExit {
-					//	cmd.Process.Kill()
-					//}
+				case <-ctx.Done():
+					return
 				}
-			case <-ctx.Done():
-				return
 			}
+		}()
+	}
+
+	go func() {
+		_, err = KubectlExec(podName, container.Name, namespace, cmdStr)
+		if err != nil {
+			logger.Errorf("failed to exec cmd %s in pod %s: %++v", cmdStr, podName, err)
+			return
 		}
+		cancel()
 	}()
 
-	//err = cmd.Wait()
-	//if err != nil {
-	//	logger.Fatalf("failed to exec cmd  '%s' in pod %s: %++v", cmdStr, podName, err)
-	//}
-	return
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		}
+	}
 }

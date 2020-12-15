@@ -121,15 +121,15 @@ func ExecWithOptions(options ExecOptions) error {
 		Name(options.PodName).
 		Namespace(options.Namespace).
 		SubResource("exec").
-		Param("container", options.ContainerName)
-	req.VersionedParams(&v1.PodExecOptions{
-		Container: options.ContainerName,
-		Command:   options.Command,
-		Stdin:     options.Stdin != nil,
-		Stdout:    options.CaptureStdout,
-		Stderr:    options.CaptureStderr,
-		TTY:       tty,
-	}, scheme.ParameterCodec)
+		Param("container", options.ContainerName).
+		VersionedParams(&v1.PodExecOptions{
+			Container: options.ContainerName,
+			Command:   options.Command,
+			Stdin:     options.Stdin != nil,
+			Stdout:    options.CaptureStdout,
+			Stderr:    options.CaptureStderr,
+			TTY:       tty,
+		}, scheme.ParameterCodec)
 
 	return execute("POST", req.URL(), restConfig, options.Stdin,
 		options.Stdout, options.Stderr, tty)
