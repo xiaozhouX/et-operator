@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"path"
-	"strings"
 )
 
 func newLauncher(obj interface{}) *corev1.Pod {
@@ -20,6 +19,7 @@ func newLauncher(obj interface{}) *corev1.Pod {
 	labels := GenLabels(job.Name)
 	labels[labelTrainingRoleType] = launcher
 	podSpec := job.Spec.ETReplicaSpecs.Launcher.Template.DeepCopy()
+
 	// copy the labels and annotations to pod from PodTemplate
 	if len(podSpec.Labels) == 0 {
 		podSpec.Labels = make(map[string]string)
@@ -27,47 +27,28 @@ func newLauncher(obj interface{}) *corev1.Pod {
 	for key, value := range labels {
 		podSpec.Labels[key] = value
 	}
-	podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, initContainer(job))
-	podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, kubedeliveryContainer())
 	if len(podSpec.Spec.Containers) == 0 {
 		logger.Errorln("Launcher pod does not have any containers in its spec")
 		return nil
 	}
 
-	container := podSpec.Spec.Containers[0]
-	container.VolumeMounts = append(container.VolumeMounts,
-		corev1.VolumeMount{
-			Name:      hostfileVolumeName,
-			MountPath: hostfileMountPath,
-		},
-		corev1.VolumeMount{
-			Name:      configVolumeName,
-			MountPath: configMountPath,
-		},
-		corev1.VolumeMount{
-			Name:      kubectlVolumeName,
-			MountPath: kubectlMountPath,
-		})
-	container.Env = append(container.Env, corev1.EnvVar{
-		Name:  "OMPI_MCA_plm_rsh_agent",
-		Value: getKubexecPath(),
-	})
-	podSpec.Spec.Containers[0] = container
-	podSpec.Spec.ServiceAccountName = launcherName
+	podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, initContainer(job))
+	podSpec.Spec.InitContainers = append(podSpec.Spec.InitContainers, kubedeliveryContainer())
 
+	setMainContainerVolumeAndEnv(podSpec)
 	setRestartPolicy(podSpec)
+
 	hostfileMode := int32(0444)
-	scriptMode := int32(0555)
 
 	podSpec.Spec.Volumes = append(podSpec.Spec.Volumes,
 		corev1.Volume{
-			Name: hostfileVolumeName,
+			Name: configFileVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		},
 		corev1.Volume{
-			Name: kubectlVolumeName,
+			Name: kubexecVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
@@ -90,11 +71,6 @@ func newLauncher(obj interface{}) *corev1.Pod {
 							Path: discoverHostName,
 							Mode: &hostfileMode,
 						},
-						{
-							Key:  kubexeclFileName,
-							Path: kubexeclFileName,
-							Mode: &scriptMode,
-						},
 					},
 				},
 			},
@@ -115,22 +91,13 @@ func newLauncher(obj interface{}) *corev1.Pod {
 
 func kubedeliveryContainer() corev1.Container {
 	return corev1.Container{
-		Name:            "kubectl-delivery",
-		Image:           "registry.cn-zhangjiakou.aliyuncs.com/kube-ai/kubectl-delivery:latest",
+		Name: "kubectl-delivery",
+		//Image:           "registry.cn-zhangjiakou.aliyuncs.com/kube-ai/kubectl-delivery:kubexec",
+		Image:           "registry.cn-zhangjiakou.aliyuncs.com/xiaozhou/kubexec",
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Env: []corev1.EnvVar{
-			{
-				Name:  "TARGET_DIR",
-				Value: kubectlMountPath,
-			},
-			{
-				Name:  "NAMESPACE",
-				Value: "default",
-			},
-		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      kubectlVolumeName,
+				Name:      kubexecVolumeName,
 				MountPath: kubectlMountPath,
 			},
 		},
@@ -149,17 +116,10 @@ func kubedeliveryContainer() corev1.Container {
 	}
 }
 func initContainer(job *kaiv1alpha1.TrainingJob) corev1.Container {
-	originHostfilePath := path.Join(configMountPath, hostfileName)
-	mountHostfilePath := getHostfilePath(job)
-	cpHostfile := fmt.Sprintf("cp %s %s && chmod 600 %s",
-		originHostfilePath,
-		mountHostfilePath,
-		mountHostfilePath)
-	originDiscoverHostPath := path.Join(configMountPath, discoverHostName)
-	discoverHostPath := path.Join(hostfileMountPath, discoverHostName)
-	cpDiscoverHostfile := fmt.Sprintf("cp %s %s && chmod +x %s",
-		originDiscoverHostPath,
-		discoverHostPath,
+	discoverHostPath := path.Join(configFileMountPath, discoverHostName)
+	cmd := fmt.Sprintf("cp %s/* %s && chmod +x %s",
+		tempMountPath,
+		configFileMountPath,
 		discoverHostPath)
 	return corev1.Container{
 		Name:            initContainerName,
@@ -167,18 +127,18 @@ func initContainer(job *kaiv1alpha1.TrainingJob) corev1.Container {
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      hostfileVolumeName,
-				MountPath: hostfileMountPath,
+				Name:      configFileVolumeName,
+				MountPath: configFileMountPath,
 			},
 			{
 				Name:      configVolumeName,
-				MountPath: configMountPath,
+				MountPath: tempMountPath,
 			},
 		},
 		Command: []string{
 			"sh",
 			"-c",
-			strings.Join([]string{cpHostfile, cpDiscoverHostfile}, " && "),
+			cmd,
 		},
 		Resources: corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{
@@ -221,8 +181,8 @@ func newWorker(obj interface{}, name string, index string) *corev1.Pod {
 
 	// if we want to use ssh, will start sshd service firstly.
 	if len(container.Command) == 0 {
-		//container.Command = []string{"sh", "-c", "sleep 365d"}
-		container.Command = []string{"sh", "-c", "/usr/sbin/sshd  && sleep 365d"}
+		container.Command = []string{"sh", "-c", "sleep 365d"}
+		//container.Command = []string{"sh", "-c", "/usr/sbin/sshd  && sleep 365d"}
 	}
 	podSpec.Spec.Containers[0] = container
 
@@ -406,7 +366,7 @@ shift
 			},
 		},
 		Data: map[string]string{
-			kubexeclFileName: kubExecCmd,
+			kubexecFileName:  kubExecCmd,
 			hostfileName:     getHostfileContent(job.Status.CurrentWorkers, getSlots(job)),
 			discoverHostName: getDiscoverHostContent(job),
 		},
@@ -431,9 +391,9 @@ done < %s
 }
 
 func getHostfilePath(_ *kaiv1alpha1.TrainingJob) string {
-	return path.Join(hostfileMountPath, hostfileName)
+	return path.Join(configFileMountPath, hostfileName)
 }
 
 func getKubexecPath() string {
-	return path.Join(configMountPath, kubexeclFileName)
+	return path.Join(configMountPath, kubexecFileName)
 }

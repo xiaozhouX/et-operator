@@ -40,31 +40,41 @@ import (
 )
 
 const (
-	controllerName          = "trainingjob"
-	configSuffix            = "-config"
-	launcherSuffix          = "-launcher"
-	workerSuffix            = "-worker"
-	kubectlVolumeName       = "training-job-kubectl"
-	configVolumeName        = "training-job-config"
-	configMountPath         = "/etc/mpi"
-	hostfileName            = "hostfile"
-	kubexeclFileName        = "kubexec.sh"
-	discoverHostName        = "discover_hosts.sh"
-	kubectlMountPath        = "/opt/kube"
+	controllerName = "trainingjob"
+	configSuffix   = "-config"
+	launcherSuffix = "-launcher"
+	workerSuffix   = "-worker"
+
+	// Volume Name
+	kubexecVolumeName    = "training-job-kubexec"
+	configVolumeName     = "training-job-config"
+	configFileVolumeName = "training-job-config-file"
+
+	// volume path on launcher or initContainer
+	configMountPath     = "/etc/mpi"
+	configFileMountPath = "/etc/edl"
+	tempMountPath       = "/tmp"
+
+	// volume path on kubexec delivery
+	kubectlMountPath = "/opt/kube"
+
+	// file name
+	hostfileName     = "hostfile"
+	kubexecFileName  = "kubexec.sh"
+	discoverHostName = "discover_hosts.sh"
+
 	labelGroupName          = "group-name"
 	labelTrainingJobName    = "training-job-name"
 	labelTrainingRoleType   = "training-job-role"
 	launcher                = "launcher"
 	worker                  = "worker"
-	initContainerCpu        = "100m"
-	initContainerEphStorage = "5Gi"
-	initContainerMem        = "512Mi"
+	initContainerCpu        = "50m"
+	initContainerEphStorage = "1Gi"
+	initContainerMem        = "50Mi"
 	replicaIndexLabel       = "replica-index"
 	gpuResourceName         = "nvidia.com/gpu"
 	initContainerImage      = "alpine:3.10"
 	initContainerName       = "init-hostfile"
-	hostfileVolumeName      = "training-job-hostfile"
-	hostfileMountPath       = "/etc/edl"
 )
 
 const (
@@ -328,6 +338,25 @@ func (r *TrainingJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // force overwrite RestartPolicy=Never
 func setRestartPolicy(podTemplateSpec *corev1.PodTemplateSpec) {
 	podTemplateSpec.Spec.RestartPolicy = corev1.RestartPolicyNever
+}
+
+// force overwrite RestartPolicy=Never
+func setMainContainerVolumeAndEnv(podSpec *corev1.PodTemplateSpec) {
+	container := podSpec.Spec.Containers[0]
+	container.VolumeMounts = append(container.VolumeMounts,
+		corev1.VolumeMount{
+			Name:      configFileVolumeName,
+			MountPath: configFileMountPath,
+		},
+		corev1.VolumeMount{
+			Name:      kubexecVolumeName,
+			MountPath: configMountPath,
+		})
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "OMPI_MCA_plm_rsh_agent",
+		Value: getKubexecPath(),
+	})
+	podSpec.Spec.Containers[0] = container
 }
 
 func (r *TrainingJobReconciler) updateObjectStatus(obj RuntimeObject, oldStatus interface{}) error {
