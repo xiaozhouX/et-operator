@@ -39,16 +39,17 @@ func (r *TrainingJobReconciler) executeScaleIn(job *kaiv1alpha1.TrainingJob, sca
 
 	toDeleteWorkers := scaleIn.GetPodNames()
 	remainWorkers := false
-	if scaleIn.Spec.Script == "" {
-		if shutdownWorkers, err := r.checkWorkerShutdown(job, toDeleteWorkers); err != nil {
-			return err
-		} else {
-			if len(toDeleteWorkers) != len(shutdownWorkers) {
-				remainWorkers = true
-				toDeleteWorkers = shutdownWorkers
-			}
+
+	// check launch process for scaleIn workers
+	if shutdownWorkers, err := r.checkWorkerShutdown(job, toDeleteWorkers); err != nil {
+		return err
+	} else {
+		if len(toDeleteWorkers) != len(shutdownWorkers) {
+			remainWorkers = true
+			toDeleteWorkers = shutdownWorkers
 		}
 	}
+
 	if err := r.DeleteWorkers(job, toDeleteWorkers); err != nil {
 		msg := fmt.Sprintf("%s delete resource failed, error: %v", scaleIn.GetFullName(), err)
 		r.updateScalerFailed(scaleIn, job, msg)

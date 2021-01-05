@@ -91,9 +91,9 @@ func newLauncher(obj interface{}) *corev1.Pod {
 
 func kubedeliveryContainer() corev1.Container {
 	return corev1.Container{
-		Name: "kubectl-delivery",
-		//Image:           "registry.cn-zhangjiakou.aliyuncs.com/kube-ai/kubectl-delivery:kubexec",
-		Image:           "registry.cn-zhangjiakou.aliyuncs.com/xiaozhou/kubexec",
+		Name:  "kubectl-delivery",
+		Image: "registry.cn-zhangjiakou.aliyuncs.com/kube-ai/kubectl-delivery:latest",
+		//Image:           "registry.cn-zhangjiakou.aliyuncs.com/xiaozhou/kubexec",
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		VolumeMounts: []corev1.VolumeMount{
 			{
