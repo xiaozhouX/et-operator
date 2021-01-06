@@ -12,7 +12,7 @@ RUN cd /workspace/src/github.com/AliyunContainerService/et-operator/hack/kubexec
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM alpine:3.11.6
 WORKDIR /
-COPY --from=builder /bin/kubexec .
+COPY --from=builder /bin/kubexec /bin/kubexec
 
 ENTRYPOINT ["/bin/sh", "-c"]
 CMD ["cp /bin/kubexec /opt/kube/kubexec.sh"]

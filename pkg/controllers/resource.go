@@ -58,7 +58,7 @@ func newLauncher(obj interface{}) *corev1.Pod {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: job.Name + configSuffix,
+						Name: configMapName(job),
 					},
 					Items: []corev1.KeyToPath{
 						{
@@ -91,10 +91,9 @@ func newLauncher(obj interface{}) *corev1.Pod {
 
 func kubedeliveryContainer() corev1.Container {
 	return corev1.Container{
-		Name:  "kubectl-delivery",
-		Image: "registry.cn-zhangjiakou.aliyuncs.com/kube-ai/kubectl-delivery:latest",
-		//Image:           "registry.cn-zhangjiakou.aliyuncs.com/xiaozhou/kubexec",
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		Name: "kubectl-delivery",
+		//Image: "registry.cn-zhangjiakou.aliyuncs.com/kube-ai/kubectl-delivery:latest",
+		Image: "registry.cn-zhangjiakou.aliyuncs.com/xiaozhou/kubexec",
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      kubexecVolumeName,
@@ -289,10 +288,14 @@ func newLauncherRole(obj interface{}, workerReplicas int32) *rbacv1.Role {
 				Verbs:         []string{"get"},
 				APIGroups:     []string{""},
 				Resources:     []string{"configmap"},
-				ResourceNames: []string{job.Name + configSuffix},
+				ResourceNames: []string{configMapName(job)},
 			},
 		},
 	}
+}
+
+func configMapName(job *kaiv1alpha1.TrainingJob) string {
+	return job.Name + configSuffix
 }
 
 func newSecret(job *kaiv1alpha1.TrainingJob) *corev1.Secret {
@@ -356,7 +359,7 @@ shift
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      job.Name + configSuffix,
+			Name:      configMapName(job),
 			Namespace: job.Namespace,
 			Labels: map[string]string{
 				"app": job.Name,
